@@ -21,12 +21,14 @@ import (
 	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
+	"github.com/hashicorp/go-hclog"
 )
 
 const WindowWidth = 600
 const SearchBoxHeight = 33
 
 type App struct {
+	log       hclog.Logger
 	plugins   []api.Plugin
 	rootItems []InternalItem
 
@@ -39,15 +41,14 @@ type App struct {
 	lastVisibleItems     int           // Number of items that is shown
 	lastClickTime        time.Duration // Time of last click on item, to detect double clicks
 	lastSearchCancelFunc *context.CancelFunc
+	eventChannel         chan api.Event
+	hotKey               api.Hotkey
 
 	// Gui state
-	scale        float32
-	isVisible    bool
-	textInput    widget.Editor
-	listWidget   widget.List
-	eventChannel chan api.Event
-	hotKey       api.Hotkey
-	eventKey     event.Tag
+	isVisible  bool
+	textInput  widget.Editor
+	listWidget widget.List
+	eventKey   event.Tag
 }
 
 type InternalItem struct {
@@ -90,15 +91,13 @@ func (i InternalItem) Description() string {
 
 func NewApp(plugins []api.Plugin) *App {
 	a := App{
+		log: hclog.New(&hclog.LoggerOptions{
+			Level: hclog.LevelFromString("DEBUG"),
+		}),
 		plugins:      plugins,
 		isVisible:    false,
 		eventChannel: make(chan api.Event),
 		itemIndex:    -1,
-		hotKey: api.Hotkey{
-			Modifiers: api.ModAlt,
-			KeyCode:   'X',
-		},
-		scale: 1.0,
 	}
 
 	a.textInput.SetCaret(0, 0)
@@ -459,22 +458,6 @@ func (a *App) addSuggestions(suggestions []SuggestItem) {
 	go func() { a.eventChannel <- api.EventSuggestionsChanged }()
 }
 
-func (a *App) handleWindowEvent(evt api.Event, w *app.Window) {
-	switch evt {
-	case api.EventHotkey:
-		a.doShow(w)
-
-	case api.EventShow:
-		a.doShow(w)
-
-	case api.EventHide:
-		a.doHide(w)
-
-	case api.EventSuggestionsChanged:
-		w.Invalidate()
-	}
-}
-
 func (a *App) doShow(w *app.Window) {
 	a.isVisible = true
 
@@ -485,6 +468,7 @@ func (a *App) doShow(w *app.Window) {
 
 func (a *App) doHide(w *app.Window) {
 	a.isVisible = false
+
 	w.Option(Hidden(true))
 	a.resetStack()
 	a.resetInput()
@@ -497,7 +481,7 @@ func (a *App) resetStack() {
 func (a *App) run() error {
 	w := app.NewWindow(
 		app.Decorated(false),
-		app.Title("GO GO"),
+		app.Title("Go Anywhere"),
 		Hidden(!a.isVisible),
 	)
 
@@ -508,11 +492,11 @@ func (a *App) run() error {
 }
 
 func (a *App) registerHotkey() {
-	// Start listening for the hotkey
-	go listenForHotkey(
-		a.hotKey, func() {
-			a.eventChannel <- api.EventHotkey
-		})
+	// api.RegisterHotKey should run as a go routine since it locks to the OS thread to allow it to have a fixed
+	// thread listening to Windows API messages
+	go api.RegisterHotKey(a.hotKey, func() {
+		a.eventChannel <- api.EventHotkey
+	})
 }
 
 func (a *App) pluginByName(k string) (api.Plugin, bool) {
@@ -526,7 +510,7 @@ func (a *App) pluginByName(k string) (api.Plugin, bool) {
 }
 
 func (a *App) Quit() {
-
+	a.eventChannel <- api.EventQuit
 }
 
 func asInternalItem(each api.Item, plugin api.Plugin) InternalItem {

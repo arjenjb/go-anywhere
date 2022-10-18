@@ -5,6 +5,7 @@ const (
 	EventShow
 	EventHide
 	EventSuggestionsChanged
+	EventQuit
 )
 
 type Event int8
