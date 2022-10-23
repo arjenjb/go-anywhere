@@ -11,6 +11,8 @@ import (
 
 	"go-keyboard-launcher/api"
 	github "go-keyboard-launcher/plugin/github/api"
+
+	"github.com/hashicorp/go-hclog"
 )
 
 //go:embed logo.png
@@ -31,6 +33,7 @@ type Config struct {
 }
 
 type Plugin struct {
+	log  hclog.Logger
 	icon *image.Image
 
 	config       Config
@@ -53,17 +56,19 @@ func (p *Plugin) LoadConfig(load func(interface{}) error) {
 	}
 }
 
-func (p *Plugin) Initialize() {
+func (p *Plugin) Initialize(log hclog.Logger) {
+	p.log = log
+
 	decoded, _, err := image.Decode(bytes.NewReader(iconData))
 	if err == nil {
 		p.icon = &decoded
 	}
 }
 
-func (p *Plugin) Catalog() error {
+func (p *Plugin) Catalog(ctx context.Context) error {
 	result := make([]api.Item, 0)
 
-	it := p.client.ListRepositoriesForAuthenticatedUser()
+	it := p.client.ListRepositoriesForAuthenticatedUser(ctx)
 
 	for {
 		found, repo, err := it.Next()
@@ -104,7 +109,6 @@ func (p *Plugin) Suggest(ctx context.Context, input string, chain []api.Item, se
 	if len(chain) == 0 {
 		return
 	} else if len(chain) == 1 {
-
 		setSuggestions([]api.Item{
 			{
 				Label:    fmt.Sprintf("Pull requests"),
@@ -128,7 +132,7 @@ func (p *Plugin) Suggest(ctx context.Context, input string, chain []api.Item, se
 
 		switch chain[1].Category {
 		case TagsCategory:
-			it := p.client.ListMatchingRefs(github.ListMatchingRefsRequest{
+			it := p.client.ListMatchingRefs(ctx, github.ListMatchingRefsRequest{
 				Repo: repoName,
 				Ref:  "tags/",
 			})
@@ -155,7 +159,7 @@ func (p *Plugin) Suggest(ctx context.Context, input string, chain []api.Item, se
 			setSuggestions(suggestions, api.MatchFuzzy)
 
 		case PullRequestCategory:
-			it := p.client.ListPulls(github.ListPullsRequest{
+			it := p.client.ListPulls(ctx, github.ListPullsRequest{
 				Repo:    repoName,
 				State:   github.Open,
 				PerPage: 30,
@@ -168,6 +172,7 @@ func (p *Plugin) Suggest(ctx context.Context, input string, chain []api.Item, se
 			for {
 				ok, item, err := it.Next()
 				if err != nil {
+					p.log.Debug("Error while retrieving data")
 					log.Printf("[Error] %s", err)
 					return
 				} else if !ok {

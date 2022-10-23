@@ -11,6 +11,7 @@ import (
 
 	"go-keyboard-launcher/api"
 
+	"github.com/hashicorp/go-hclog"
 	"golang.design/x/clipboard"
 )
 
@@ -22,27 +23,29 @@ const (
 )
 
 type Plugin struct {
+	log  hclog.Logger
 	icon *image.Image
+}
+
+func (p *Plugin) Initialize(log hclog.Logger) {
+	p.log = log
+	decoded, _, err := image.Decode(bytes.NewReader(iconData))
+	if err == nil {
+		p.icon = &decoded
+	}
 }
 
 func (p *Plugin) LoadConfig(f func(interface{}) error) {
 	// No configuration to load
 }
 
-func (p *Plugin) Catalog() error {
+func (p *Plugin) Catalog(context.Context) error {
 	// Items are dynamic, nothing to do yet
 	return nil
 }
 
 func (p *Plugin) Name() string {
 	return "expr"
-}
-
-func (p *Plugin) Initialize() {
-	decoded, _, err := image.Decode(bytes.NewReader(iconData))
-	if err == nil {
-		p.icon = &decoded
-	}
 }
 
 func (p *Plugin) Icon() *image.Image {

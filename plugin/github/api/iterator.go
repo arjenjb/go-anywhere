@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 )
 
 type Iterator[T any] struct {
+	ctx     context.Context
 	url     string
 	fetched bool
 	i       int
@@ -35,7 +37,7 @@ func (r *Iterator[T]) Next() (ok bool, item T, err error) {
 }
 
 func (r *Iterator[T]) fetch() error {
-	resp, err := r.client.executeUrl(r.url)
+	resp, err := r.client.executeUrl(r.ctx, r.url)
 	if err != nil {
 		return err
 	}
@@ -64,6 +66,7 @@ func (r *Iterator[T]) fetch() error {
 }
 
 type PagingIterator[T any] struct {
+	ctx      context.Context
 	items    []T
 	i        int
 	nextLink string
@@ -106,7 +109,7 @@ func (p *PagingIterator[T]) Next() (found bool, item T, err error) {
 }
 
 func (p *PagingIterator[T]) fetchNext() error {
-	resp, err := p.client.executeUrl(p.nextLink)
+	resp, err := p.client.executeUrl(p.ctx, p.nextLink)
 	if err != nil {
 		return err
 	}

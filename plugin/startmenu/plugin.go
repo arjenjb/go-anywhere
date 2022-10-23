@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 
 	"go-keyboard-launcher/api"
+
+	"github.com/hashicorp/go-hclog"
 )
 
 type Plugin struct {
@@ -20,7 +22,7 @@ func (p *Plugin) LoadConfig(f func(interface{}) error) {
 	// No configuration to load
 }
 
-func (p *Plugin) Catalog() error {
+func (p *Plugin) Catalog(context.Context) error {
 	directory := filepath.Join(os.Getenv("ProgramData"), "Microsoft", "Windows", "Start Menu", "Programs")
 	err := collectApplicationsFrom(directory, &p.items)
 	if err != nil {
@@ -40,7 +42,7 @@ func (p *Plugin) Name() string {
 	return "win32-apps"
 }
 
-func (p *Plugin) Initialize() {
+func (p *Plugin) Initialize(log hclog.Logger) {
 
 }
 

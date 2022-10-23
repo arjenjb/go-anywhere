@@ -9,28 +9,31 @@ import (
 
 	"go-keyboard-launcher/api"
 
+	"github.com/hashicorp/go-hclog"
 	"golang.design/x/clipboard"
 )
 
 type Plugin struct {
+	log  hclog.Logger
 	icon *image.Image
+}
+
+func (p *Plugin) Initialize(log hclog.Logger) {
+	p.log = log
+	p.loadIcon()
 }
 
 func (p *Plugin) LoadConfig(f func(interface{}) error) {
 	// No configuration to load
 }
 
-func (p *Plugin) Catalog() error {
+func (p *Plugin) Catalog(context.Context) error {
 	// Nothing to do here
 	return nil
 }
 
 func (p *Plugin) Name() string {
 	return "str"
-}
-
-func (p *Plugin) Initialize() {
-	p.loadIcon()
 }
 
 func (p *Plugin) loadIcon() {
@@ -44,18 +47,18 @@ func (p *Plugin) loadIcon() {
 
 	decoded, _, err := image.Decode(f)
 	if err != nil {
-		log.Printf("[ERROR] Could not decode icon")
+		p.log.Debug("")
 		return
 	}
 
 	p.icon = &decoded
 }
 
-func (p Plugin) Icon() *image.Image {
+func (p *Plugin) Icon() *image.Image {
 	return p.icon
 }
 
-func (p Plugin) GetItems() ([]api.Item, error) {
+func (p *Plugin) GetItems() ([]api.Item, error) {
 	return []api.Item{{
 		Label:       "String: Base64",
 		Description: "",

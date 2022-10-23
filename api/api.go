@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"image"
+
+	"github.com/hashicorp/go-hclog"
 )
 
 type ItemCategory int
@@ -46,11 +48,11 @@ func (i Item) String() string {
 type SuggestionCallback func([]Item, Match)
 
 type Plugin interface {
-	Initialize()
-	Catalog() error
+	Initialize(log hclog.Logger)
+	Catalog(ctx context.Context) error
+	Suggest(ctx context.Context, input string, chain []Item, callback SuggestionCallback)
 	Icon() *image.Image
 	GetItems() ([]Item, error)
-	Suggest(ctx context.Context, input string, chain []Item, callback SuggestionCallback)
 	Execute(Item)
 	Name() string
 

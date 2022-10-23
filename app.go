@@ -33,10 +33,10 @@ type App struct {
 	rootItems []InternalItem
 
 	// Item state
-	catalogMutex sync.Mutex
-	itemIndex    int
-	suggestItems []SuggestItem
-	itemStack    []StackEntry
+	catalogMutex     sync.Mutex
+	suggestItems     []SuggestItem
+	suggestItemIndex int
+	itemStack        []StackEntry
 
 	lastVisibleItems     int           // Number of items that is shown
 	lastClickTime        time.Duration // Time of last click on item, to detect double clicks
@@ -58,8 +58,10 @@ type InternalItem struct {
 }
 
 type StackEntry struct {
-	item       InternalItem
-	searchText string // The text that was searched for
+	item             InternalItem
+	searchText       string        // The text that was searched for
+	suggestItems     []SuggestItem // Then items that were suggested when pushed on the stack
+	suggestItemIndex int
 }
 
 type SuggestItem struct {
@@ -94,10 +96,10 @@ func NewApp(plugins []api.Plugin) *App {
 		log: hclog.New(&hclog.LoggerOptions{
 			Level: hclog.LevelFromString("DEBUG"),
 		}),
-		plugins:      plugins,
-		isVisible:    false,
-		eventChannel: make(chan api.Event),
-		itemIndex:    -1,
+		plugins:          plugins,
+		isVisible:        false,
+		eventChannel:     make(chan api.Event),
+		suggestItemIndex: -1,
 	}
 
 	a.textInput.SetCaret(0, 0)
@@ -113,7 +115,7 @@ func NewApp(plugins []api.Plugin) *App {
 
 	// Initialize the plugins
 	for _, p := range plugins {
-		p.Initialize()
+		p.Initialize(a.log.Named(p.Name()))
 	}
 
 	return &a
@@ -121,8 +123,8 @@ func NewApp(plugins []api.Plugin) *App {
 
 func (a *App) Catalog() {
 	for _, p := range a.plugins {
-		if err := p.Catalog(); err != nil {
-			log.Printf("Failed to catalog plugin %s\n: %s", p.Name(), err)
+		if err := p.Catalog(context.Background()); err != nil {
+			a.log.Error(fmt.Sprintf("Failed to catalog plugin %s", p.Name()), err)
 		}
 	}
 }
@@ -147,8 +149,10 @@ func (a *App) itemSuggest() {
 
 	// Push the item on the stack
 	a.itemStack = append(a.itemStack, StackEntry{
-		item:       item,
-		searchText: a.textInput.Text(),
+		item:             item,
+		searchText:       a.textInput.Text(),
+		suggestItems:     a.suggestItems,
+		suggestItemIndex: a.suggestItemIndex,
 	})
 	a.resetInput()
 
@@ -156,28 +160,28 @@ func (a *App) itemSuggest() {
 }
 
 func (a *App) itemDown() {
-	if a.itemIndex == len(a.suggestItems)-1 {
+	if a.suggestItemIndex == len(a.suggestItems)-1 {
 		// We're at the end of the list
 		return
 	}
-	a.itemIndex++
+	a.suggestItemIndex++
 
 	// Update the list scroll position if needed
 	p := a.listWidget.Position.First + a.lastVisibleItems
-	if a.itemIndex >= p {
-		a.listWidget.Position.First = a.itemIndex - a.lastVisibleItems + 1
+	if a.suggestItemIndex >= p {
+		a.listWidget.Position.First = a.suggestItemIndex - a.lastVisibleItems + 1
 	}
 }
 
 func (a *App) itemUp() {
-	if a.itemIndex <= 0 {
+	if a.suggestItemIndex <= 0 {
 		// We are already at the start of the list
 		return
 	}
-	a.itemIndex--
+	a.suggestItemIndex--
 
-	if a.itemIndex < a.listWidget.Position.First {
-		a.listWidget.Position.First = a.itemIndex
+	if a.suggestItemIndex < a.listWidget.Position.First {
+		a.listWidget.Position.First = a.suggestItemIndex
 	}
 }
 
@@ -200,6 +204,11 @@ func (a *App) popItemStack() {
 	// Restore the last search text
 	a.textInput.SetText(top.searchText)
 	a.textInput.SetCaret(len(top.searchText), len(top.searchText))
+
+	a.suggestItems = top.suggestItems
+	a.suggestItemIndex = top.suggestItemIndex
+
+	//a.Search(top.searchText)
 }
 
 func (a *App) resetInput() {
@@ -218,8 +227,9 @@ func (a *App) enter() {
 	if item.Item.ArgsHint == api.Required {
 		// Push the item on the stack
 		a.itemStack = append(a.itemStack, StackEntry{
-			item:       item,
-			searchText: a.textInput.Text(),
+			item:         item,
+			searchText:   a.textInput.Text(),
+			suggestItems: a.suggestItems,
 		})
 
 		a.resetInput()
@@ -272,36 +282,41 @@ func (a *App) Search(input string) {
 	// Remove whitespace and lower for search matching
 	search := strings.ToLower(strings.Trim(input, " "))
 
-	// Search query is empty
-	if len(search) > 0 && len(a.itemStack) == 0 {
-		// Find items that match directly
-		var suggestions []SuggestItem
+	// If the stack is empty
+	if len(a.itemStack) == 0 {
+		if len(search) == 0 {
 
-		for _, item := range a.catalog() {
-			if s := MatchScore(search, item.lookupName); s > 0.0 {
-				suggestions = append(suggestions, SuggestItem{Item: item, Score: s})
+			// If there is no search query empty the list of suggestItems, we're done
+			a.clearSuggestions()
+			return
+
+		} else {
+			// Find items that match directly
+			var suggestions []SuggestItem
+
+			for _, item := range a.catalog() {
+				if s := MatchScore(search, item.lookupName); s > 0.0 {
+					suggestions = append(suggestions, SuggestItem{Item: item, Score: s})
+				}
 			}
-		}
 
-		a.setSuggestions(suggestions)
-	} else {
-		// If there is no search query, first empty the suggestions
-		a.clearSuggestions()
+			a.setSuggestions(suggestions)
+		}
 	}
 
 	// Dispatch search to plugins
 	ctx, cancel := context.WithCancel(context.Background())
 	a.lastSearchCancelFunc = &cancel
 
-	// Let the plugins do some suggestions
+	// Let the plugins do some suggestItems
 	if len(a.itemStack) > 0 {
 		p := a.itemStack[0].item.plugin
 		stack := collectItems(a.itemStack)
-		log.Printf("Stack size: %d\n", len(stack))
+
 		// The original user input is passed
 		go p.Suggest(ctx, input, stack, func(items []api.Item, match api.Match) {
 			internalItems := createSuggestions(items, match, p, search)
-			a.addSuggestions(internalItems)
+			a.setSuggestions(internalItems)
 		})
 
 	} else {
@@ -341,6 +356,7 @@ func createSuggestions(items []api.Item, match api.Match, p api.Plugin, search s
 			Score: score,
 		})
 	}
+
 	return internalItems
 }
 
@@ -361,11 +377,11 @@ func (a *App) cancelLastSearch() {
 }
 
 func (a *App) HasCurrentItem() bool {
-	return a.itemIndex != -1
+	return a.suggestItemIndex != -1
 }
 
 func (a *App) CurrentItem() InternalItem {
-	return a.suggestItems[a.itemIndex].Item
+	return a.suggestItems[a.suggestItemIndex].Item
 }
 
 func (a *App) rebuildCatalog() {
@@ -392,7 +408,7 @@ func (a *App) clearSuggestions() {
 
 	a.catalogMutex.Lock()
 	a.suggestItems = nil
-	a.itemIndex = -1
+	a.suggestItemIndex = -1
 	a.catalogMutex.Unlock()
 
 	go func() { a.eventChannel <- api.EventSuggestionsChanged }()
@@ -412,8 +428,8 @@ func (a *App) setSuggestions(suggestions []SuggestItem) {
 	a.suggestItems = suggestions
 
 	// If we have any results, select the first item
-	if a.itemIndex == -1 && len(suggestions) > 0 {
-		a.itemIndex = 0
+	if a.suggestItemIndex == -1 && len(suggestions) > 0 {
+		a.suggestItemIndex = 0
 	}
 
 	a.catalogMutex.Unlock()
@@ -445,12 +461,12 @@ func (a *App) addSuggestions(suggestions []SuggestItem) {
 		return result[i].Score > result[j].Score
 	})
 
-	log.Println("Found some extra suggestions")
+	log.Println("Found some extra suggestItems")
 	a.suggestItems = result
 
 	// If we have any results, select the first item
-	if a.itemIndex == -1 && len(result) > 0 {
-		a.itemIndex = 0
+	if a.suggestItemIndex == -1 && len(result) > 0 {
+		a.suggestItemIndex = 0
 	}
 
 	a.catalogMutex.Unlock()

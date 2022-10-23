@@ -40,7 +40,6 @@ var colorHighlightItem = color.NRGBA{R: 0x2e, G: 0x64, B: 0x70, A: 0xff}
 
 //var colorText = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 var colorText = color.NRGBA{R: 0xdd, G: 0xDD, B: 0xDD, A: 0xff}
-
 var colorDescriptionText = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x33}
 
 const ItemHeight = 26
@@ -119,7 +118,7 @@ func (a *App) eventLoop(w *app.Window) error {
 								gtx.Constraints.Max.Y = ItemHeight
 								gtx.Constraints.Min.Y = ItemHeight
 								item := a.suggestItems[index].Item
-								return drawItem(gtx, theme, item, index == a.itemIndex)
+								return drawItem(gtx, theme, item, index == a.suggestItemIndex)
 							},
 						)
 
@@ -162,13 +161,13 @@ func (a *App) handleInputEvents(gtx layout.Context) {
 			switch e.Type {
 			// Handle single and double-clicks on list items
 			case pointer.Press:
-				lastIndex := a.itemIndex
-				a.itemIndex = a.listWidget.Position.First + int(e.Position.Y/24)
+				lastIndex := a.suggestItemIndex
+				a.suggestItemIndex = a.listWidget.Position.First + int(e.Position.Y/24)
 
 				clickDelta := e.Time - a.lastClickTime
 				a.lastClickTime = e.Time
 
-				if lastIndex == a.itemIndex && clickDelta < time.Millisecond*500 {
+				if lastIndex == a.suggestItemIndex && clickDelta < time.Millisecond*500 {
 					// It's a double click, on the same item
 					a.enter()
 				}
